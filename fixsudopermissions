@@ -1,0 +1,34 @@
+#!/bin/bash
+
+# fix_sudo_permissions.sh
+# Restores correct ownership and permissions to critical system binaries
+
+# List of critical binaries and their expected permission/ownership
+declare -A BINARIES=(
+  [/usr/bin/sudo]="root:root:4755"
+  [/bin/su]="root:root:4755"
+  [/usr/bin/su]="root:root:4755"
+  [/bin/mount]="root:root:4755"
+  [/bin/umount]="root:root:4755"
+  [/usr/bin/passwd]="root:root:4755"
+  [/usr/bin/chsh]="root:root:4755"
+  [/usr/bin/gpasswd]="root:root:4755"
+  [/usr/bin/newgrp]="root:root:4755"
+)
+
+echo "🔧 Restoring critical binary permissions..."
+for bin in "${!BINARIES[@]}"; do
+  IFS=':' read -r owner group mode <<< "${BINARIES[$bin]}"
+  if [[ -f "$bin" ]]; then
+    echo "✔ Fixing $bin..."
+    chown "$owner":"$group" "$bin"
+    chmod "$mode" "$bin"
+  else
+    echo "⚠️ WARNING: $bin not found!"
+  fi
+done
+
+echo "✅ All available binaries repaired."
+echo
+echo "🔍 Current sudo binary state:"
+ls -l /usr/bin/sudo
