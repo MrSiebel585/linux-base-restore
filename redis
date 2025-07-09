@@ -1,0 +1,32 @@
+
+#!/bin/bash
+
+echo "🔧 Starting Redis repair..."
+
+echo "🧼 Fixing permissions..."
+chown -R redis:redis /var/lib/redis
+chmod 770 /var/lib/redis
+
+if [ -f /run/redis/redis-server.pid ]; then
+    echo "🧹 Removing stale PID file..."
+    rm /run/redis/redis-server.pid
+fi
+
+echo "🔍 Checking Redis config..."
+REDIS_CONF=$(find /etc -name redis.conf | head -1)
+if [[ ! -f "$REDIS_CONF" ]]; then
+    echo "❌ Config not found! Reinstalling..."
+    apt-get install --reinstall redis-server -y
+else
+    echo "✔️ Config found at: $REDIS_CONF"
+fi
+
+echo "🚀 Restarting Redis..."
+systemctl daemon-reexec
+systemctl restart redis-server
+systemctl enable redis-server
+
+echo "📜 Redis status:"
+systemctl status redis-server --no-pager
+
+echo "✅ Redis repair complete."
