@@ -1,0 +1,4 @@
+systemctl restart redis-server@openvas
+systemctl restart ospd-openvas
+systemctl restart notus-scanner
+systemctl restart rcbrain
