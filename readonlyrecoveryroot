@@ -1,0 +1,52 @@
+#!/bin/bash
+
+echo "[*] Starting FULLY AUTOMATED Read-Only Recovery..."
+
+# Step 1: Check and remount root filesystem
+echo "[*] Checking if / is mounted read-only..."
+if mount | grep 'on / ' | grep -q 'ro,'; then
+    ROOT_DEV=$(findmnt -n -o SOURCE /)
+    echo "[!] Root is read-only. Attempting to remount $ROOT_DEV as read/write..."
+    mount -o remount,rw $ROOT_DEV
+    sleep 2
+    if mount | grep 'on / ' | grep -q 'rw,'; then
+        echo "[+] Successfully remounted root as read/write."
+    else
+        echo "[!!] Remount failed. Running fsck on $ROOT_DEV (non-interactive)..."
+        fsck -y $ROOT_DEV
+        echo "[*] Reboot and re-run script after fsck if errors were found."
+        exit 1
+    fi
+else
+    echo "[+] Root filesystem is already read/write."
+fi
+
+# Step 2: Fix /etc/resolv.conf if DNS fails
+echo "[*] Verifying network and DNS access..."
+ping -c 1 1.1.1.1 > /dev/null 2>&1 && {
+    ping -c 1 google.com > /dev/null 2>&1 || {
+        echo "[!] DNS is down. Setting fallback DNS..."
+        echo "nameserver 1.1.1.1" > /etc/resolv.conf
+    }
+} || {
+    echo "[!!] Network unreachable. Please check cable or WiFi connection."
+}
+
+# Step 3: Extract recovery binaries
+if [ -f ./minimal_usr_bin.tar.gz ]; then
+    echo "[*] Extracting minimal_usr_bin.tar.gz to /usr/bin/ ..."
+    tar -xzf ./minimal_usr_bin.tar.gz -C /usr/bin/
+    echo "[+] Extraction complete."
+else
+    echo "[!] Recovery archive minimal_usr_bin.tar.gz not found in current directory!"
+fi
+
+# Step 4: Restore critical packages
+echo "[*] Attempting to reinstall core packages (if apt is functional)..."
+apt update && apt install --reinstall coreutils bash apt dpkg -y
+
+# Step 5: Suggest full recovery base
+echo "[*] You can now fully restore with:"
+echo "    sudo apt install --reinstall ubuntu-standard ubuntu-minimal"
+
+echo "[✔] Fully automated recovery process complete."
