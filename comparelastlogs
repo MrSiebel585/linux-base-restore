@@ -1,0 +1,46 @@
+#!/bin/bash
+
+# === CONFIG ===
+LOG_DIR="/var/log"
+COUNT=5         # how many top files to consider
+TMPDIR="/tmp/log_compare"
+mkdir -p "$TMPDIR"
+
+echo "🔍 Finding $COUNT largest recently written log files in $LOG_DIR..."
+
+# === Find top N logs by size & recency ===
+mapfile -t top_logs < <(find "$LOG_DIR" -type f -name "*.log" -printf '%T@ %s %p\n' 2>/dev/null \
+    | sort -k2 -nr | head -n $COUNT | awk '{print $3}')
+
+echo ""
+printf "%-35s | %-10s | %s\n" "LOG FILE" "SIZE(MB)" "LAST MODIFIED"
+echo "---------------------------------------------------------------"
+
+for file in "${top_logs[@]}"; do
+    sz=$(du -m "$file" | cut -f1)
+    mod=$(stat -c %y "$file" | cut -d'.' -f1)
+    printf "%-35s | %-10s | %s\n" "$file" "$sz MB" "$mod"
+done
+
+echo ""
+read -p "📂 Do you want to compare the top 2 files? (y/n): " ans
+
+if [[ "$ans" == "y" ]]; then
+    FILE1="${top_logs[0]}"
+    FILE2="${top_logs[1]}"
+
+    echo "🔍 Comparing:"
+    echo "1️⃣ $FILE1"
+    echo "2️⃣ $FILE2"
+
+    cp "$FILE1" "$TMPDIR/1.log"
+    cp "$FILE2" "$TMPDIR/2.log"
+
+    echo -e "\n🧠 Diff Summary:"
+    diff -y --suppress-common-lines "$TMPDIR/1.log" "$TMPDIR/2.log" | head -n 50
+
+    echo -e "\n📁 Full diff saved to $TMPDIR/diff_summary.txt"
+    diff "$TMPDIR/1.log" "$TMPDIR/2.log" > "$TMPDIR/diff_summary.txt"
+else
+    echo "❌ Skipped comparison."
+fi
