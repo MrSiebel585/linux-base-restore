@@ -1,0 +1,161 @@
+#!/bin/bash
+
+# This script automates the chroot process for a broken Linux system from a live USB.
+# USE WITH EXTREME CAUTION! Incorrect inputs can lead to data loss.
+# ALWAYS DOUBLE-CHECK PARTITION NAMES BEFORE PROCEEDING.
+
+echo "--------------------------------------------------------"
+echo "        Linux Chroot Automation Script"
+echo "--------------------------------------------------------"
+echo "WARNING: This script will modify your system. Ensure you"
+echo "have identified the correct partitions. Incorrect usage"
+echo "can lead to data loss. Proceed with caution!"
+echo "--------------------------------------------------------"
+
+# --- 1. Identify and Display Partitions ---
+echo ""
+echo "--- Step 1: Identifying Available Partitions ---"
+echo "Please identify your root (/), /boot (if separate), and /boot/efi (if separate) partitions."
+echo "Running 'lsblk -f' to list partitions and their filesystems:"
+echo "--------------------------------------------------------"
+sudo lsblk -f
+echo "--------------------------------------------------------"
+
+# --- 2. Get User Input for Partitions ---
+echo ""
+echo "--- Step 2: Enter Partition Information ---"
+
+read -p "Enter the FULL path to your ROOT partition (e.g., /dev/sda2, /dev/nvme0n1p2): " ROOT_PARTITION
+
+read -p "Is your /boot directory on a SEPARATE partition? (yes/no): " SEPARATE_BOOT_CHOICE
+SEPARATE_BOOT_CHOICE=$(echo "$SEPARATE_BOOT_CHOICE" | tr '[:upper:]' '[:lower:]') # Convert to lowercase
+
+BOOT_PARTITION=""
+if [[ "$SEPARATE_BOOT_CHOICE" == "yes" ]]; then
+    read -p "Enter the FULL path to your BOOT partition (e.g., /dev/sda1): " BOOT_PARTITION
+fi
+
+read -p "Is your /boot/efi directory on a SEPARATE EFI partition? (yes/no - common for UEFI systems): " SEPARATE_EFI_CHOICE
+SEPARATE_EFI_CHOICE=$(echo "$SEPARATE_EFI_CHOICE" | tr '[:upper:]' '[:lower:]') # Convert to lowercase
+
+EFI_PARTITION=""
+if [[ "$SEPARATE_EFI_CHOICE" == "yes" ]]; then
+    read -p "Enter the FULL path to your EFI partition (e.g., /dev/sda1, /dev/nvme0n1p1): " EFI_PARTITION
+fi
+
+echo ""
+echo "--- Confirming Your Inputs ---"
+echo "Root Partition:      $ROOT_PARTITION"
+echo "Separate /boot:      $SEPARATE_BOOT_CHOICE"
+if [[ "$SEPARATE_BOOT_CHOICE" == "yes" ]]; then
+    echo "Boot Partition:      $BOOT_PARTITION"
+fi
+echo "Separate /boot/efi:  $SEPARATE_EFI_CHOICE"
+if [[ "$SEPARATE_EFI_CHOICE" == "yes" ]]; then
+    echo "EFI Partition:       $EFI_PARTITION"
+fi
+echo "--------------------------------------------------------"
+
+read -p "Are these partition details CORRECT? (yes/no): " CONFIRM_CHOICE
+CONFIRM_CHOICE=$(echo "$CONFIRM_CHOICE" | tr '[:upper:]' '[:lower:]')
+
+if [[ "$CONFIRM_CHOICE" != "yes" ]]; then
+    echo "Aborting script. Please re-run and provide correct information."
+    exit 1
+fi
+
+# --- 3. Setup Mount Point ---
+CHROOT_DIR="/mnt/chroot"
+echo ""
+echo "--- Step 3: Setting Up Mount Point and Mounting Partitions ---"
+echo "Creating mount directory: $CHROOT_DIR"
+sudo mkdir -p "$CHROOT_DIR" || { echo "Error: Could not create $CHROOT_DIR. Exiting."; exit 1; }
+
+# --- 4. Mount Root Partition ---
+echo "Mounting root partition: $ROOT_PARTITION to $CHROOT_DIR"
+sudo mount "$ROOT_PARTITION" "$CHROOT_DIR" || { echo "Error: Could not mount $ROOT_PARTITION. Exiting."; exit 1; }
+
+# --- 5. Mount /boot and /boot/efi if separate ---
+if [[ "$SEPARATE_BOOT_CHOICE" == "yes" && -n "$BOOT_PARTITION" ]]; then
+    echo "Mounting separate /boot partition: $BOOT_PARTITION to $CHROOT_DIR/boot"
+    sudo mkdir -p "$CHROOT_DIR/boot" || { echo "Error: Could not create $CHROOT_DIR/boot. Exiting."; exit 1; }
+    sudo mount "$BOOT_PARTITION" "$CHROOT_DIR/boot" || { echo "Error: Could not mount $BOOT_PARTITION. Exiting."; exit 1; }
+fi
+
+if [[ "$SEPARATE_EFI_CHOICE" == "yes" && -n "$EFI_PARTITION" ]]; then
+    echo "Mounting separate EFI partition: $EFI_PARTITION to $CHROOT_DIR/boot/efi"
+    sudo mkdir -p "$CHROOT_DIR/boot/efi" || { echo "Error: Could not create $CHROOT_DIR/boot/efi. Exiting."; exit 1; }
+    sudo mount "$EFI_PARTITION" "$CHROOT_DIR/boot/efi" || { echo "Error: Could not mount $EFI_PARTITION. Exiting."; exit 1; }
+fi
+
+# --- 6. Mount Essential Virtual Filesystems ---
+echo "Mounting essential virtual filesystems..."
+sudo mount --bind /dev "$CHROOT_DIR/dev" || { echo "Error mounting /dev. Exiting."; exit 1; }
+sudo mount --bind /dev/pts "$CHROOT_DIR/dev/pts" || { echo "Error mounting /dev/pts. Exiting."; exit 1; }
+sudo mount -t proc proc "$CHROOT_DIR/proc" || { echo "Error mounting /proc. Exiting."; exit 1; }
+sudo mount -t sysfs sys "$CHROOT_DIR/sys" || { echo "Error mounting /sys. Exiting."; exit 1; }
+sudo mount --bind /run "$CHROOT_DIR/run" || { echo "Error mounting /run. Exiting."; exit 1; }
+
+# --- 7. Copy DNS Configuration ---
+echo "Copying /etc/resolv.conf for internet access inside chroot..."
+sudo cp /etc/resolv.conf "$CHROOT_DIR/etc/" || echo "Warning: Could not copy /etc/resolv.conf. Internet may not work in chroot."
+
+echo ""
+echo "--- Step 4: Entering Chroot Environment ---"
+echo "You are now in your broken system's environment."
+echo "Perform your repairs (e.g., update grub, reinstall kernel, fix fstab, reset password)."
+echo "Type 'exit' to leave the chroot environment when done."
+echo "--------------------------------------------------------"
+
+# --- 8. Chroot Command ---
+# Check for arch-chroot utility (common in Arch-based live environments)
+if command -v arch-chroot &> /dev/null; then
+    echo "Using 'arch-chroot' for better automation..."
+    sudo arch-chroot "$CHROOT_DIR" /bin/bash
+else
+    echo "Using standard 'chroot'..."
+    sudo chroot "$CHROOT_DIR" /bin/bash
+fi
+
+echo ""
+echo "--- Step 5: Exiting Chroot and Unmounting Partitions ---"
+echo "You have exited the chroot environment."
+echo "Starting unmount process..."
+
+# --- 9. Unmount Filesystems ---
+# Unmount in reverse order or use recursive if allowed/needed
+# Using separate unmounts for clarity and error handling
+sudo umount "$CHROOT_DIR/run" 2>/dev/null || echo "Warning: Could not unmount $CHROOT_DIR/run"
+sudo umount "$CHROOT_DIR/sys" 2>/dev/null || echo "Warning: Could not unmount $CHROOT_DIR/sys"
+sudo umount "$CHROOT_DIR/proc" 2>/dev/null || echo "Warning: Could not unmount $CHROOT_DIR/proc"
+sudo umount "$CHROOT_DIR/dev/pts" 2>/dev/null || echo "Warning: Could not unmount $CHROOT_DIR/dev/pts"
+sudo umount "$CHROOT_DIR/dev" 2>/dev/null || echo "Warning: Could not unmount $CHROOT_DIR/dev"
+
+if [[ "$SEPARATE_EFI_CHOICE" == "yes" && -n "$EFI_PARTITION" ]]; then
+    sudo umount "$CHROOT_DIR/boot/efi" 2>/dev/null || echo "Warning: Could not unmount $CHROOT_DIR/boot/efi"
+fi
+if [[ "$SEPARATE_BOOT_CHOICE" == "yes" && -n "$BOOT_PARTITION" ]]; then
+    sudo umount "$CHROOT_DIR/boot" 2>/dev/null || echo "Warning: Could not unmount $CHROOT_DIR/boot"
+fi
+
+sudo umount "$CHROOT_DIR" 2>/dev/null || { echo "Error: Could not unmount $CHROOT_DIR. Manual unmount required. Target might be busy."; }
+
+# Optional: Clean up the mount directory if empty
+sudo rmdir "$CHROOT_DIR" 2>/dev/null || echo "Warning: Could not remove empty $CHROOT_DIR."
+
+echo ""
+echo "--------------------------------------------------------"
+echo "Chroot process completed. All mounted partitions have been unmounted (or attempts made)."
+echo "You can now reboot your system."
+echo "--------------------------------------------------------"
+read -p "Reboot now? (yes/no): " REBOOT_CHOICE
+REBOOT_CHOICE=$(echo "$REBOOT_CHOICE" | tr '[:upper:]' '[:lower:]')
+
+if [[ "$REBOOT_CHOICE" == "yes" ]]; then
+    echo "Rebooting..."
+    sudo reboot
+else
+    echo "Not rebooting. You can manually reboot later."
+fi
+
+exit 0
