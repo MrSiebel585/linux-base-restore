@@ -1,0 +1,46 @@
+#!/bin/bash
+
+# Function to identify the root device
+identify_root_device() {
+    ROOT_DEVICE=$(findmnt -no SOURCE /)
+    echo "Root device identified: $ROOT_DEVICE"
+}
+
+# Function to initialize Boot Repair
+initialize_bootrepair() {
+    wget https://fostips.com/install-boot-repair-ubuntu/ bootrepair.html
+    sudo add-apt-repository ppa:yannubuntu/boot-repair
+    sudo apt update
+    sudo apt --fix-broken install 
+    sudo apt install boot-repair
+    sudo boot-repair
+}
+
+# Function to swap new partitions
+swap_new_partitions() {
+    local partition="$1"
+    sudo chroot "$partition" dpkg --configure -a
+    sudo chroot "$partition" apt-get install -fy
+    sudo chroot "$partition" apt-get install -y mdadm
+    sudo chroot "$partition" mdadm --assemble --scan
+    sudo chroot "$partition" apt-get purge --allow-remove-essential -y grub-com*
+    sudo chroot "$partition" apt-get purge --allow-remove-essential -y grub2-com*
+    sudo chroot "$partition" apt-get purge --allow-remove-essential -y shim-signed
+    sudo chroot "$partition" apt-get purge --allow-remove-essential -y grub-common:*
+    sudo chroot "$partition" apt-get purge --allow-remove-essential -y grub2-common:*
+}
+
+# Main script execution
+
+# Identify the root device
+identify_root_device
+
+# Initialize Boot Repair
+initialize_bootrepair
+
+# Swap new partitions using the identified root device or a specific partition
+# Example: swap_new_partitions "/mnt/boot-sav/sda3"
+swap_new_partitions "/mnt/boot-sav/sda3"
+
+# Install GRUB EFI on the partition
+sudo chroot "/mnt/boot-sav/sda3" apt-get install -y grub-efi
